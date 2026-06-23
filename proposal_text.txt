@@ -1,0 +1,642 @@
+Ising–GAN Project Proposal	Statistical Physics × Generative AI
+
+
+
+PROJECT PROPOSAL
+
+
+
+Learning Physically Consistent
+
+Ising Spin Configurations
+
+with Deep Generative Adversarial Networks
+
+A Python Reimplementation of a Monte Carlo Ising Simulator,
+
+Coupled with a GAN-Based Generative Pipeline and Physics-Based Validation
+
+Prepared for Faculty Review
+
+Domain: Statistical Physics  •  Computer Vision  •  Generative AI
+
+Date: June 2026
+
+
+
+
+Table of Contents
+
+
+
+
+
+
+
+
+1.  Executive Summary
+
+This proposal outlines a research project that asks whether a deep generative neural network can independently rediscover the statistical behavior of a classical physical system — the two-dimensional Ising model — using nothing but example images. No equations, no Hamiltonians, and no statistical mechanics will be shown to the network. It will only ever see binary spin-lattice images.
+
+The original simulation code was written in Fortran and supplied by the faculty. Since this implementation will be carried out without access to a Linux/Fortran toolchain, the simulator will be faithfully reimplemented in Python, preserving the exact same physics, the same Metropolis Monte Carlo update rule, and the same parameters (L, equilibrium_cycle, measurement_cycle). This Python simulator becomes the data generation engine for the entire project.
+
+Once a dataset of spin configurations is generated across a sweep of temperatures, a Generative Adversarial Network (GAN) will be trained to reproduce these configurations. The project's central deliverable is not a GAN that produces visually convincing images — it is quantitative proof, using real statistical-physics metrics (magnetization, energy, spin correlation, and cluster-size distributions), that the GAN has internalized the same physical laws that govern the original simulation, including the critical phase transition.
+
+Core Research Question
+
+Can a neural network discover the statistical laws of a physical system purely from image examples, without being told any physics?
+
+
+
+This question sits in a growing area of scientific machine learning, and the techniques developed here — binary image generation, distribution matching, and physics-based validation of generative output — transfer directly to medical image synthesis, molecular generation, materials discovery, and climate modeling.
+
+2.  Scientific Background
+
+2.1  The Two-Dimensional Ising Model
+
+The Ising model is one of the most studied models in statistical physics. A material is represented as an L × L grid, where every cell holds a 'spin' value of either +1 (spin up) or −1 (spin down). For this project, L = 128, giving a lattice of 128 × 128 = 16,384 spins. Every lattice configuration can be rendered directly as a binary image, where +1 maps to a white pixel and −1 maps to a black pixel.
+
+Spins interact with their nearest neighbors through the Ising Hamiltonian:
+
+H = -J * Σ(i,j neighbors)  s_i * s_j
+
+where J is the coupling constant (J > 0 for a ferromagnet) and the sum runs over all nearest-neighbor pairs. This single equation is the entire physical law governing the system — and critically, the GAN trained in this project will never see it.
+
+2.2  The Role of Temperature
+
+Temperature T controls how much thermal noise disrupts spin alignment. The behavior of the system falls into three regimes:
+
+Regime
+
+Physical Behavior
+
+Visual Signature
+
+Low temperature
+(T < Tc)
+
+Spins align into a single dominant direction — an ordered, ferromagnetic phase
+
+Large uniform regions of one color; very few isolated flipped spins
+
+Critical temperature
+(T ≈ 2.269 J/kB)
+
+The phase transition. Order and disorder compete at every length scale
+
+Fractal-like clusters of all sizes — the most visually and statistically rich regime
+
+High temperature
+(T > Tc)
+
+Thermal noise dominates; spins flip randomly — a disordered, paramagnetic phase
+
+Salt-and-pepper noise pattern with no large-scale structure
+
+
+
+2.3  Why the Critical Point Is the Real Benchmark
+
+Near the critical temperature, the correlation length of the system diverges and clusters appear at every scale simultaneously — a property known as scale invariance. This is the signature of a continuous phase transition, and it is mathematically the hardest regime to reproduce, because there is no single dominant length scale for a generative model to latch onto. A GAN that only reproduces convincing images at very low or very high temperature has learned something close to memorization. A GAN that reproduces the correct cluster statistics at the critical point has learned something closer to the actual physics. For this reason, performance near Tc is treated as the most important checkpoint in evaluation (Section 6).
+
+3.  Reimplementing the Supplied Fortran Code in Python
+
+The professor's existing simulator is written in Fortran and is designed to run in a Linux environment. Since this project will be developed without Linux or a Fortran compiler available, the simulation will be faithfully reimplemented in Python — preserving identical physics, identical algorithmic steps, and identical parameters — so that the resulting datasets are scientifically equivalent to what the original Fortran code would have produced.
+
+3.1  What the Fortran Code Currently Does
+
+Based on the parameters and structure of the supplied code, the simulator implements a standard 2D Ising model evolved with the Metropolis Monte Carlo algorithm. The key parameters identified in the code are:
+
+Parameter
+
+Value
+
+Role in the Simulation
+
+L
+
+128
+
+Side length of the square lattice. Grid is L × L = 16,384 spins.
+
+equilibrium_cycle
+
+500,000
+
+Number of Monte Carlo sweeps discarded before data collection, allowing the lattice to relax into thermal equilibrium at the target temperature.
+
+measurement_cycle
+
+1,000
+
+Number of equilibrium configurations recorded to disk per temperature, after the equilibration phase.
+
+spin values
+
++1 / −1
+
+Binary state of each lattice site (up / down).
+
+
+
+3.2  Algorithmic Steps to Reproduce
+
+The Python reimplementation will reproduce the following Metropolis Monte Carlo procedure, sweep for sweep:
+
+Initialize an L × L lattice with random +1/−1 spins.
+
+For each Monte Carlo sweep, visit every lattice site (or select sites at random) and compute the energy change ΔE that would result from flipping that spin, using the four nearest neighbors with periodic boundary conditions.
+
+Accept the flip with probability min(1, exp(−ΔE / kBT)) — the Metropolis acceptance rule.
+
+Repeat for equilibrium_cycle sweeps without recording anything, so the system reaches thermal equilibrium at temperature T.
+
+After equilibration, continue sweeping and save a snapshot of the full lattice every fixed number of sweeps, for measurement_cycle total saved configurations.
+
+Repeat the entire procedure independently for each temperature in the sweep (Section 4.2).
+
+3.3  Python Translation Strategy
+
+The translation will proceed in three stages of increasing performance, so correctness is verified before speed is optimized:
+
+Stage A — Pure NumPy reference implementation: a straightforward, readable vectorized version using NumPy array operations. This version is the 'ground truth' against which faster versions are checked, since it is the easiest to verify by hand against known Ising model results (e.g. critical temperature, expected magnetization curve).
+
+Stage B — Numba-accelerated version: the same algorithm compiled with Numba's @njit decorator for near-C performance. This is necessary because Monte Carlo spin updates are inherently sequential and do not vectorize well in pure NumPy; Numba allows a fast, simple loop-based implementation instead.
+
+Stage C (if needed) — Checkerboard/vectorized updates: splitting the lattice into a checkerboard pattern so that all spins of one color can be updated simultaneously without conflicting with their neighbors, enabling GPU or full-array vectorization for the largest lattice sizes (L = 256).
+
+3.4  Validation Against Known Physics
+
+Before any GAN training begins, the Python simulator itself must be validated, independent of the original Fortran code, using well-established theoretical results for the 2D Ising model:
+
+The theoretical critical temperature Tc = 2 / ln(1 + √2) ≈ 2.269 (Onsager's exact solution) must appear as a sharp feature in the simulated magnetization-vs-temperature curve.
+
+Magnetization should approach ±1 at low T and approach 0 at high T, with a smooth but increasingly sharp transition as L grows.
+
+Specific heat and susceptibility (computed from energy and magnetization fluctuations) should show a peak at Tc.
+
+Visual inspection: generated lattice images should visibly match the three regimes described in Section 2.2.
+
+Why this matters
+
+If the Python simulator does not reproduce known Ising model physics, none of the GAN evaluation later in this project would be meaningful — the 'ground truth' dataset itself would be flawed. This validation step is non-negotiable and is scheduled as its own milestone in Section 7.
+
+4.  Data Generation Pipeline
+
+4.1  Pipeline Overview
+
+The end-to-end data pipeline converts the physics simulator's raw output into a clean, labeled image dataset ready for GAN training:
+
+Python Ising Simulator (NumPy / Numba)
+
+        |
+
+        v
+
+Raw spin matrices  (+1 / -1,  shape L x L)
+
+        |
+
+        v
+
+CSV export   (one file per saved configuration, or batched)
+
+        |
+
+        v
+
+CSV -> PNG conversion  (+1 -> white pixel, -1 -> black pixel)
+
+        |
+
+        v
+
+Labeled image dataset   data/T_<temperature>/config_<id>.png
+
+        |
+
+        v
+
+PyTorch Dataset / DataLoader  -->  GAN training (Section 5)
+
+4.2  Temperature Sweep Design
+
+Configurations will be generated across a temperature sweep that densely samples the region around the critical point, since that is where the most informative physics — and the hardest test for the GAN — occurs:
+
+Temperature Range
+
+Step Size
+
+Purpose
+
+1.0 – 2.0
+
+0.2
+
+Ordered phase, coarse sampling
+
+2.0 – 2.6
+
+0.05
+
+Dense sampling around Tc ≈ 2.269 — the critical region
+
+2.6 – 4.0
+
+0.2
+
+Disordered phase, coarse sampling
+
+
+
+This non-uniform sweep produces roughly 35–40 distinct temperature points, weighted toward the scientifically interesting region, rather than the simpler uniform sweep originally suggested. This is a deliberate refinement that should make the final results noticeably more convincing.
+
+4.3  Dataset Scale
+
+Quantity
+
+Value
+
+Notes
+
+Lattice size (L)
+
+128 × 128
+
+Matches the original Fortran configuration
+
+Temperature points
+
+~35–40
+
+Weighted sweep, see 4.2
+
+Configurations per temperature
+
+1,000
+
+Matches measurement_cycle in the original code
+
+Total images
+
+~35,000 – 40,000
+
+Ample for GAN training given image simplicity
+
+Image format
+
+PNG, 1-bit / grayscale
+
+128 × 128 pixels, lossless
+
+
+
+4.4  Folder & File Structure
+
+ising_dataset/
+
+  T_1.00/  config_0001.png ... config_1000.png
+
+  T_1.20/  config_0001.png ... config_1000.png
+
+  ...
+
+  T_2.25/  config_0001.png ... config_1000.png   <-- near-critical
+
+  T_2.27/  config_0001.png ... config_1000.png   <-- critical
+
+  T_2.30/  config_0001.png ... config_1000.png
+
+  ...
+
+  T_4.00/  config_0001.png ... config_1000.png
+
+  metadata.csv     (filename, temperature, magnetization, energy)
+
+A metadata.csv file will accompany the images, recording the temperature, magnetization, and energy of every saved configuration. This makes the dataset reusable for both conditional GAN training (Section 5.4) and the physics evaluation suite (Section 6) without recomputation.
+
+5.  Generative Model Architecture
+
+5.1  Model Selection Rationale
+
+Binary spin images are simpler than natural images (only two pixel intensities, strong local correlation structure, periodic boundary symmetry), which makes convolutional GANs a well-suited and computationally efficient choice. Three architectures will be implemented in increasing order of sophistication:
+
+Stage
+
+Model
+
+Purpose
+
+Baseline
+
+DCGAN
+
+Establish a working pipeline; fast to train and debug
+
+Primary
+
+WGAN-GP
+
+Wasserstein loss with gradient penalty for stable, mode-collapse-resistant training
+
+Extension
+
+Conditional WGAN-GP
+
+Temperature-conditioned generation (Section 5.4)
+
+
+
+5.2  Generator Architecture
+
+Input: latent noise vector z ~ N(0, I), dimension 100
+
+4 transposed-convolution blocks, each followed by BatchNorm and ReLU
+
+Progressive upsampling: 4×4 → 16×16 → 64×64 → 128×128
+
+Final layer: Tanh activation, producing pixel values in [−1, +1] (mapped back to {−1, +1} spins via thresholding for evaluation)
+
+5.3  Discriminator / Critic Architecture
+
+Input: 128×128 single-channel image (real or generated)
+
+4 convolutional blocks with LeakyReLU and spectral normalization (replacing BatchNorm, which is incompatible with the WGAN-GP gradient penalty)
+
+Output: a single scalar realism score (no sigmoid — required for Wasserstein loss)
+
+5.4  Temperature Conditioning (Planned Extension)
+
+Once the unconditional WGAN-GP is validated, the architecture will be extended into a conditional GAN by injecting the temperature value into both the generator and critic — concatenated into the generator's latent vector and added as an extra channel in the critic's input. This allows a single trained model to generate configurations at any requested temperature, including temperatures that were sparsely sampled or entirely unseen during training, directly testing whether the network has learned a smooth, physically meaningful representation of the phase diagram rather than memorizing isolated temperature buckets.
+
+5.5  Training Configuration
+
+Setting
+
+Value
+
+Framework
+
+PyTorch
+
+Batch size
+
+64
+
+Optimizer
+
+Adam, lr = 0.0002, β₁ = 0.5, β₂ = 0.999
+
+Critic updates per generator update
+
+5 (standard WGAN-GP ratio)
+
+Gradient penalty coefficient (λ)
+
+10
+
+Epochs
+
+150–300, monitored via evaluation metrics rather than a fixed count
+
+Compute
+
+Google Colab (T4 / A100 GPU, free / Pro tier)
+
+
+
+6.  Physics-Based Evaluation Framework
+
+Visual plausibility is not sufficient evidence of success. The central scientific claim of this project — that the GAN has learned the underlying statistical physics — must be supported by quantitative agreement between physics-simulated and GAN-generated configurations across four independent metrics.
+
+6.1  Magnetization
+
+M = (1/N) * Σ s_i          (N = total number of spins)
+
+Magnetization measures net spin alignment. The full distribution of M across many generated samples — not just its average — will be compared against the physics simulation at each temperature, since matching only the mean would hide failures in variance or higher-order behavior.
+
+6.2  Energy
+
+E = -J * Σ(i,j neighbors) s_i * s_j
+
+The energy distribution is a direct probe of how well local spin-spin interactions are reproduced, independent of global alignment. Energy histograms from GAN samples will be overlaid against simulation histograms at matching temperatures.
+
+6.3  Spin-Spin Correlation Function
+
+C(r) = < s_i * s_j >   for all pairs at separation r
+
+This measures how spin alignment decays with distance. Near Tc, this decay follows a power law rather than an exponential one — a hallmark of criticality. Reproducing the correct correlation function shape, especially near Tc, is considered the single most rigorous test in this project.
+
+6.4  Cluster Size Distribution
+
+Using connected-component labeling, the sizes of all same-sign spin clusters will be extracted from both real and generated images. At the critical temperature, this distribution should follow a power law (scale-free clusters of all sizes); away from Tc, it should be dominated by either one giant cluster (ordered phase) or many small clusters (disordered phase).
+
+6.5  Comparison & Reporting Method
+
+For every metric, results will be reported in three complementary forms:
+
+Overlaid histograms / kernel density plots — physics simulation vs. GAN, per temperature
+
+Metric-vs-temperature curves — to check that the GAN reproduces the same phase transition shape as the physics simulation, not just isolated matching points
+
+A single scalar discrepancy score (Wasserstein distance) between real and generated distributions — enabling an at-a-glance, quantitative summary table across all temperatures and all four metrics
+
+Definition of Success
+
+The project is considered scientifically successful if the GAN-generated distributions for magnetization, energy, and correlation function fall within a small, pre-defined Wasserstein-distance tolerance of the physics simulation at every tested temperature — including, critically, near Tc.
+
+7.  Project Timeline
+
+The project is structured into seven phases over an estimated seven-week period. Each phase has a concrete deliverable, so progress can be checked against the original Fortran-derived specification at every stage.
+
+	Phase 1  Theory & Fortran Code Analysis	Week 1
+
+Study the 2D Ising model, Metropolis algorithm, and known critical-point theory
+
+Line-by-line read-through of the supplied Fortran code to extract exact algorithmic logic
+
+Document every parameter, update rule, and boundary condition used in the original code
+
+Set up Python environment: NumPy, Numba, PyTorch, Matplotlib, scikit-image
+
+	Phase 2  Python Simulator Development & Validation	Week 2
+
+Implement Stage A (pure NumPy) Ising simulator at small L (e.g. 16, 32) for fast iteration
+
+Implement Stage B (Numba-accelerated) version and confirm it matches Stage A output statistically
+
+Validate against theoretical Tc ≈ 2.269 and known magnetization/energy curves
+
+Scale up to full L = 128 and confirm performance is acceptable for the full temperature sweep
+
+	Phase 3  Full Dataset Generation	Week 3
+
+Run the validated simulator across the full weighted temperature sweep (Section 4.2)
+
+Generate ~35,000–40,000 labeled configurations with metadata.csv
+
+Convert CSV outputs to PNG images; spot-check visually against expected regimes
+
+Package the dataset into a PyTorch-ready folder structure
+
+	Phase 4  Baseline DCGAN	Week 4
+
+Implement and train a DCGAN on the full unconditional dataset
+
+Build the core evaluation scripts: magnetization and energy comparison
+
+Diagnose and resolve common GAN training failures (mode collapse, instability)
+
+	Phase 5  WGAN-GP & Full Evaluation Suite	Week 5
+
+Implement WGAN-GP with spectral normalization and gradient penalty
+
+Build remaining evaluation metrics: correlation function and cluster-size distribution
+
+Run full comparison across all sampled temperatures, with emphasis on the critical region
+
+	Phase 6  Temperature-Conditioned GAN	Week 6
+
+Extend WGAN-GP to a conditional architecture using temperature as a conditioning input
+
+Train on the full labeled dataset
+
+Test generation at sparsely-sampled or held-out temperatures to assess interpolation quality
+
+	Phase 7  Final Evaluation, Report & Presentation	Week 7
+
+Compile all comparison plots and the scalar discrepancy summary table
+
+Write the final report, structured around the evaluation framework in Section 6
+
+Prepare a presentation deck highlighting the critical-point results as the centerpiece finding
+
+8.  Technology Stack
+
+Category
+
+Tool
+
+Purpose
+
+Language
+
+Python 3.10+
+
+All simulation and ML code
+
+Numerical core
+
+NumPy
+
+Array operations, reference simulator
+
+Performance
+
+Numba (@njit)
+
+Near-C speed for Monte Carlo sweeps
+
+Deep learning
+
+PyTorch
+
+GAN implementation and training
+
+Image I/O
+
+Pillow, torchvision
+
+CSV-to-PNG conversion, dataset loading
+
+Scientific analysis
+
+scikit-image, SciPy
+
+Cluster labeling, correlation functions
+
+Visualization
+
+Matplotlib, Seaborn
+
+All comparison plots and figures
+
+Compute
+
+Google Colab (T4 / A100)
+
+GPU-accelerated training
+
+Version control
+
+GitHub
+
+Code and experiment tracking
+
+Reporting
+
+Jupyter Notebook
+
+Reproducible, documented experiments
+
+9.  Anticipated Risks & Mitigations
+
+Risk
+
+Likelihood / Impact
+
+Mitigation
+
+Python simulator does not match Fortran-equivalent physics exactly
+
+Medium / High
+
+Validate against Onsager's exact theoretical results (Section 3.4) before any GAN work begins
+
+GAN training instability (mode collapse, non-convergence)
+
+Medium / Medium
+
+Use WGAN-GP from an early stage; monitor evaluation metrics during training, not just loss curves
+
+Critical-region behavior is too difficult for the GAN to reproduce
+
+Medium / High
+
+Oversample the critical region (Section 4.2); treat partial success here as a valid, reportable finding
+
+Simulation runtime too slow on available hardware
+
+Low / Medium
+
+Numba acceleration; reduce equilibrium_cycle for smaller L during development, restore full value for final dataset
+
+Conditional GAN extension (Section 5.4) running out of time
+
+Medium / Low
+
+Treated as a stretch goal; unconditional WGAN-GP with full evaluation (Phases 1–5) is the complete, gradable core of the project
+
+10.  Expected Outcomes
+
+10.1  Core Deliverables
+
+A validated Python reimplementation of the Fortran Ising simulator, with documented agreement against theoretical predictions
+
+A labeled dataset of ~35,000–40,000 spin configurations spanning the full ordered–critical–disordered range
+
+A trained WGAN-GP capable of generating new, statistically valid spin configurations
+
+A complete physics-based evaluation report comparing GAN output to simulation ground truth on magnetization, energy, correlation function, and cluster statistics
+
+10.2  Stretch Outcomes
+
+A temperature-conditioned GAN capable of interpolating to unseen temperatures
+
+Evidence of whether the GAN reproduces the critical phase transition with the correct qualitative shape, even if not exact quantitative agreement
+
+10.3  Skills Developed
+
+Beyond the specific results, this project builds direct experience in numerical simulation and validation, GAN architecture and stability techniques, quantitative evaluation of generative models against ground truth, and the broader discipline of physics-informed and physics-validated machine learning — a skill set directly transferable to medical imaging, molecular design, and other scientific AI domains.
+
+Page  of

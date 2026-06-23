@@ -1,0 +1,19 @@
+# ising-gan requirements
+# Install with: pip install -r requirements.txt
+# For GPU (Kaggle/Colab): install torch separately with CUDA build
+
+numpy>=1.24
+numba>=0.57
+scipy>=1.11
+matplotlib>=3.7
+seaborn>=0.12
+pillow>=10.0
+scikit-image>=0.21
+pandas>=2.0
+tqdm>=4.65
+jupyter>=1.0
+ipykernel>=6.0
+
+# PyTorch — CPU version (override on Kaggle/Colab with CUDA wheel)
+torch>=2.0
+torchvision>=0.15
